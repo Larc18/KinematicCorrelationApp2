@@ -58,7 +58,6 @@ public class ProcessOrchestrator {
         System.out.println("Starting ProcessOrchestrator");
         System.out.println("========================================");
 
-        // Stage 1: Data Import - Read all subject records
         TrialSessionBuilder trialSessionBuilder = new TrialSessionBuilder(folderURL);
         this.trialSessions = trialSessionBuilder.getTrialSessions();
 
@@ -70,7 +69,6 @@ public class ProcessOrchestrator {
         System.out.printf("Successfully loaded participants: %d%n", this.trialSessions.size());
 
 
-        // Stage 2: Individual Subject Processing Pipeline
         int totalCriticalErrors = 0;
         int totalWarnings = 0;
         int totalExcludedTrials = 0;
@@ -93,9 +91,6 @@ public class ProcessOrchestrator {
                 System.out.println(technicalReport);
             }
 
-            // (a) Trials mit kritischen Validierungsfehlern wurden soeben von TechnicalValidationService
-            // markiert (Trial.isExcluded()) und werden ab hier konsequent aus Normalisierung/Statistik/
-            // Export ausgeschlossen, statt nur geloggt zu werden.
             List<Trial> excludedTrials = session.getTrials().stream()
                     .filter(t -> t != null && t.isExcluded())
                     .toList();
@@ -107,17 +102,13 @@ public class ProcessOrchestrator {
                 }
             }
 
-            // Time Normalization (Spline-interpolation onto a 101-point equidistant percentage scale)
             System.out.println("  [2/3] Executing Time Normalization (0% - 100%)...");
             this.timeNormalizationService.normalizeTrial(session);
 
-            // (b) Zählt, wie viele (nicht ausgeschlossene) Trials keine echte Fensterdetektion
-            // erreichten und stattdessen auf den kompletten Trial zurückgefallen sind.
             totalFallbackTrials += (int) session.getTrials().stream()
                     .filter(t -> t != null && !t.isExcluded() && t.isWindowFallbackUsed())
                     .count();
 
-            // Biomechanical Validation (Anatomical angle constraints checking)
             System.out.println("  [3/3] Running Biomechanical Validation...");
             ValidationReport biomechanicalReport = this.biomechanicalValidationService.validate(session);
             totalCriticalErrors += biomechanicalReport.getErrors().size();
@@ -134,15 +125,10 @@ public class ProcessOrchestrator {
         System.out.printf("[Validation Summary] %d trial(s) used a fallback movement window (whole-trial, no reliable window detected).%n",
                 totalFallbackTrials);
 
-
-        // Stage 3: Cross-Subject Statistical Analysis
-        // (ICC calculations require the multi-subject sample variance, hence processed outside the loop)
         System.out.println("%nStarting aggregate Statistical Analysis across all subjects...");
         this.statisticalAnalysisService = new StatisticalAnalysisService(this.trialSessions);
         AnalysisResults finalResults = this.statisticalAnalysisService.analyze();
 
-
-        // Stage 4: Results Export
         System.out.println("Exporting processed metrics to filesystem...");
         this.htmlChartExportService = new HtmlChartExportService(folderURL);
         this.htmlChartExportService.exportAggregatedDashboard(this.trialSessions, finalResults);

@@ -89,10 +89,6 @@ public class TimeNormalizationService {
                 Trial openCapTrial = ocList.get(i);
                 Trial theiaTrial = thList.get(i);
 
-                // Sicherheitsprüfung: Die Zuordnung erfolgt über den Dateinamens-Präfix, nicht
-                // über das bereits bekannte Movement. Bei einer Präfix-Kollision zwischen zwei
-                // unterschiedlichen Bewegungsordnern würden sonst falsche Trials gegeneinander
-                // normalisiert und verglichen werden, ohne dass ein Fehler sichtbar wird.
                 if (openCapTrial.getMovement() != theiaTrial.getMovement()) {
                     System.err.printf("  [Skip] Movement mismatch for prefix '%s': OpenCap '%s' (%s) vs Theia '%s' (%s) — skipping pair.%n",
                             prefix,
@@ -105,9 +101,6 @@ public class TimeNormalizationService {
                         java.nio.file.Paths.get(openCapTrial.getSourceFileName()).getFileName(),
                         java.nio.file.Paths.get(theiaTrial.getSourceFileName()).getFileName());
 
-                // CRITICAL FIX: Ein "plain" switch wirft eine NullPointerException, sobald der
-                // Selektor null ist. Da unerkannte Datei-/Ordnernamen zu movement == null führen
-                // können, muss dieser Fall explizit über "case null" abgefangen werden.
                 MovementStrategy strategy = switch (openCapTrial.getMovement()) {
                     case null -> {
                         System.err.printf("  [Warning] Trial '%s' has no recognized Movement — falling back to DefaultStrategy.%n",
@@ -121,9 +114,6 @@ public class TimeNormalizationService {
                     case BECKEN_RUMPF_ROTATION -> new BBRStrategy();
                 };
 
-                // Jeder Trial bestimmt sein Fenster selbst (in Sekunden),
-                // sodass die Fenstererkennung unabhängig von der Framerate korrekt arbeitet.
-                // 50% der normierten Kurve entspricht damit für beide Systeme derselben Bewegungsphase.
                 normalizeSingleTrial(openCapTrial, strategy);
                 normalizeSingleTrial(theiaTrial, strategy);
             }
@@ -140,28 +130,21 @@ public class TimeNormalizationService {
         List<FrameData> frames = trial.getFrameDataList();
         if (frames == null || frames.isEmpty()) return;
 
-        // CRITICAL FIX (a): Trials mit kritischen Validierungsfehlern (siehe TechnicalValidationService)
-        // werden von der Normalisierung und damit von der gesamten Statistik/dem Export ausgeschlossen.
         if (trial.isExcluded()) {
             System.err.printf("  [Skip] '%s' excluded from analysis (Reason: %s).%n",
                     trial.getSourceFileName(), trial.getExclusionReason());
             return;
         }
 
-        // Fenster in Sekunden — unabhängig von der Framerate des jeweiligen Systems
         MovementWindow window = strategy.findMovementWindow(frames);
         double startSec = window.startSeconds();
         double endSec = window.endSeconds();
 
-        // CRITICAL FIX (b): Kennzeichnet, ob die Fensterhysterese des jeweiligen Movements
-        // fehlgeschlagen ist und stattdessen der komplette Trial als Fenster verwendet wurde.
-        // Downstream (CSV-/HTML-Export) wird dies sichtbar gemacht statt es zu verschweigen.
         trial.setWindowFallbackUsed(window.fallbackUsed());
 
         int startIdx = findFrameForTime(frames, startSec);
         int endIdx = findFrameForTime(frames, endSec);
 
-        // Defensive Boundary-Clips
         startIdx = Math.max(0, Math.min(startIdx, frames.size() - 1));
         endIdx = Math.max(startIdx, Math.min(endIdx, frames.size() - 1));
 
@@ -177,9 +160,6 @@ public class TimeNormalizationService {
             return;
         }
 
-        // Nur der fachliche Analyseumfang (Hüfte/Knie/Sprunggelenk) wird normalisiert —
-        // andere Gelenke (Becken, LWS etc.) werden nur roh für die Fenstererkennung
-        // der jeweiligen MovementStrategy gebraucht, siehe Joints.ANALYSIS_SCOPE.
         for (Joints joint : Joints.ANALYSIS_SCOPE) {
             if (!frames.get(startIdx).jointAngle().containsKey(joint)) continue;
 
@@ -288,7 +268,7 @@ public class TimeNormalizationService {
         for (int i = 0; i < n; i++) {
             x[i] = (100.0 / (n - 1)) * i;
         }
-        x[n - 1] = 100.0; // Floating-point boundary fix
+        x[n - 1] = 100.0;
 
         SplineInterpolator interpolator = new SplineInterpolator();
         PolynomialSplineFunction spline = interpolator.interpolate(x, cutAngles);

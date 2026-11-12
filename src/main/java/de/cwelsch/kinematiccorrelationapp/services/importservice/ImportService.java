@@ -22,22 +22,7 @@ import java.util.stream.Stream;
  */
 public class ImportService {
 
-    // Standardvariante für Knie und Sprunggelenk bei Theia-Trials.
     public static final AngleMethod DEFAULT_ANGLE_METHOD = AngleMethod.CARDAN;
-
-    // KALIBRIERUNGSKORREKTUR SPRUNGGELENK (nur AngleMethod.VECTOR): Der 3-Punkte-Vektorwinkel zwischen (Knie->Sprunggelenk)
-    // und (Zehen->Sprunggelenk) liegt bei Theias r_foot/r_toes-Landmarkendefinition im entspannten,
-    // ruhigen Stand NICHT bei 90° (wie ursprünglich angenommen), sondern systembedingt bei ~111.6°.
-    // Ohne Korrektur erzeugt das einen konstanten ~22° Offset gegenüber OpenCap über die gesamte
-    // Bewegung hinweg (RMSE wird künstlich aufgebläht, obwohl die ICC-Konsistenz - die gegen
-    // konstante Offsets robust ist - eigentlich gut ist).
-    // Empirisch hergeleitet AUSSCHLIESSLICH aus Theias eigener Rohgeometrie während der Stand-Baseline
-    // vor Bewegungsbeginn (erste 10 Frames aller SQT-Trials, n=84 über alle 14 Proband:innen der
-    // eigenen Datenerhebung, beide Seiten: rechts -21.63°/SD 2.98°, links -21.55°/SD 2.59°, praktisch
-    // identisch -> ein gemeinsamer, bilateral-symmetrischer Korrekturwert). KEIN Abgleich gegen
-    // OpenCap: Referenzpunkt ist die physiologische Ruhestand-Neutralstellung (ISB-Konvention: 0°
-    // Dorsi-/Plantarflexion im entspannten Stand), ausschließlich aus dem eigenen Theia-Rohsignal
-    // an dieser bekannten Referenzhaltung bestimmt.
     private static final double ANKLE_NEUTRAL_REFERENCE_DEGREES = 90.0 + 21.59;
 
     private final String url;
@@ -201,13 +186,6 @@ public class ImportService {
         int totalFrames = timeColumn.size();
         List<FrameData> frames = new ArrayList<>(totalFrames);
 
-        // PERFORMANCE FIX: Spalten-Zuordnung (Column->Joint für OpenCap, lowercase-Key-Lookup für
-        // Theia) wurde vorher für JEDEN einzelnen Frame neu aufgebaut (mapColumnToJoint()-Aufrufe
-        // bzw. eine komplette "coords"-HashMap mit toLowerCase()/trim() auf jedem Spaltennamen) statt
-        // einmalig VOR der Frame-Schleife. Die Spaltennamen ändern sich zwischen Frames nicht — bei
-        // Trials mit tausenden Frames und vielen Spalten (v.a. Theia mit ~30 Segmenten x XYZ +
-        // Rotationskanälen) summierte sich diese O(Frames x Spalten) String-/HashMap-Arbeit spürbar
-        // auf. Jetzt einmalig vorberechnet, in der Frame-Schleife nur noch direkte List-Zugriffe.
         Map<Joints, List<Double>> openCapJointColumns = null;
         Map<String, List<Double>> theiaLowerCaseColumns = null;
 
@@ -233,7 +211,6 @@ public class ImportService {
             Map<Joints, Double> jointAngles = new HashMap<>();
 
             if (isOpenCap) {
-                // OPENCAP: Gelenkwinkel liegen direkt als Spalten vor
                 for (Map.Entry<Joints, List<Double>> entry : openCapJointColumns.entrySet()) {
                     List<Double> values = entry.getValue();
                     if (i < values.size()) {
@@ -246,17 +223,6 @@ public class ImportService {
                 final Map<String, List<Double>> coords = theiaLowerCaseColumns;
                 final int frameIndex = i;
 
-                // ── Schritt 2: Euler-Winkel direkt aus vorberechneten Parser-Spalten lesen ─
-                // Becken- und LWS-Rotationen sowie alle drei Hüft-Freiheitsgrade (rechts/links) wurden
-                // im TheiaMarkerlessParser aus vollen Rotationsmatrizen extrahiert (relative Rotation
-                // Becken->Oberschenkel für die Hüfte, XYZ-Cardan-Zerlegung nach Grood & Suntay 1983)
-                // und unter OpenCap-kompatiblen Keys gespeichert. HIP_ADDUCTION_R/L und HIP_ROTATION_R/L
-                // sind zwar (noch) nicht Teil von Joints.ANALYSIS_SCOPE (siehe dortiger Kommentar),
-                // werden aber jetzt mitgelesen, da der Parser sie liefert und sie z. B. für eine
-                // Plausibilitätsdiskussion im Anhang nützlich sein können.
-                // Bei AngleMethod.CARDAN gilt dasselbe für Knie (Oberschenkel->Unterschenkel) und
-                // Sprunggelenk (Unterschenkel->Fuß); bei AngleMethod.VECTOR entstehen sie in Schritt 4.
-                // PELVIS_TX/TY/TZ werden bewusst NICHT gelesen (Einheit: Meter, nicht Grad).
                 List<Joints> parserAngleJoints = new ArrayList<>(List.of(
                         Joints.PELVIS_TILT, Joints.PELVIS_LIST, Joints.PELVIS_ROTATION,
                         Joints.LUMBAR_EXTENSION, Joints.LUMBAR_BENDING, Joints.LUMBAR_ROTATION,
@@ -269,14 +235,12 @@ public class ImportService {
                             Joints.ANKLE_ANGLE_R, Joints.ANKLE_ANGLE_L));
                 }
                 for (Joints joint : parserAngleJoints) {
-                    // Direkter Key-Lookup auf der originalen columns-Map (case-sensitive, exakt wie Parser)
                     Double val = getValueAt(coords, joint.getOpenCapKey().toLowerCase().trim(), frameIndex);
                     if (val != null && !val.isNaN()) {
                         jointAngles.put(joint, val);
                     }
                 }
 
-                // ── Schritt 3: 3D-Koordinaten auf Joints mappen ──────────────────────────
                 for (Joints joint : Joints.values()) {
                     String key = joint.getTheiaKey().toLowerCase().trim();
                     Double x = getValueAt(coords, key + "_x", frameIndex);
@@ -288,13 +252,6 @@ public class ImportService {
                     }
                 }
 
-                // ── Schritt 4: Gelenkwinkel aus 3D-Koordinaten berechnen ─────────────────
-                // HINWEIS: HIP_FLEXION_R/L werden NICHT mehr hier aus einem 3-Punkte-Vektorwinkel
-                // berechnet (vermischte alle 3 Hüft-Freiheitsgrade) — siehe Schritt 2, wo der Wert
-                // jetzt aus der sauber zerlegten relativen Becken->Oberschenkel-Rotationsmatrix
-                // gelesen wird (siehe TheiaMarkerlessParser.computeRelativeJointAngles).
-
-                // --- RECHTE UNTERE EXTREMITÄT ---
                 Point3D rThigh = jointCenters.get(Joints.HIP_FLEXION_R);
                 Point3D rShank = jointCenters.get(Joints.KNEE_ANGLE_R);
                 Point3D rFoot = jointCenters.get(Joints.ANKLE_ANGLE_R);
@@ -305,20 +262,10 @@ public class ImportService {
                             Math.abs(180.0 - Point3D.calculateAngle(rThigh.subtract(rShank), rFoot.subtract(rShank))));
                 }
                 if (angleMethod == AngleMethod.VECTOR && rShank != null && rFoot != null && rToes != null) {
-                    // CRITICAL FIX: KNEE_ANGLE/HIP_FLEXION dürfen Math.abs() behalten, weil ihr
-                    // Referenzpunkt (180°) am RAND des möglichen Wertebereichs von calculateAngle()
-                    // ([0°,180°]) liegt — abs() ist dort ein No-op. Der Sprunggelenk-Referenzpunkt
-                    // liegt dagegen MITTEN im Wertebereich, und echte Bewegungen (z.B. Squat)
-                    // durchqueren ihn: abs() faltete Dorsalflexion und Plantarflexion auf dieselbe
-                    // positive Kurve — die Kurve lief dadurch spiegelverkehrt zur signierten
-                    // OpenCap-Kurve (Tal statt Berg), empirisch an echten Squat-Daten bestätigt.
-                    // Referenzwinkel siehe ANKLE_NEUTRAL_REFERENCE_DEGREES (empirisch aus Theias
-                    // eigener Stand-Baseline, nicht der naiv angenommene 90°-Wert).
                     jointAngles.put(Joints.ANKLE_ANGLE_R,
                             ANKLE_NEUTRAL_REFERENCE_DEGREES - Point3D.calculateAngle(rShank.subtract(rFoot), rToes.subtract(rFoot)));
                 }
 
-                // --- LINKE UNTERE EXTREMITÄT ---
                 Point3D lThigh = jointCenters.get(Joints.HIP_FLEXION_L);
                 Point3D lShank = jointCenters.get(Joints.KNEE_ANGLE_L);
                 Point3D lFoot = jointCenters.get(Joints.ANKLE_ANGLE_L);
@@ -333,7 +280,6 @@ public class ImportService {
                             ANKLE_NEUTRAL_REFERENCE_DEGREES - Point3D.calculateAngle(lShank.subtract(lFoot), lToes.subtract(lFoot)));
                 }
 
-                // --- OBERE EXTREMITÄTEN ---
                 Double tx = getValueAt(coords, "thorax_x", frameIndex);
                 Double ty = getValueAt(coords, "thorax_y", frameIndex);
                 Double tz = getValueAt(coords, "thorax_z", frameIndex);

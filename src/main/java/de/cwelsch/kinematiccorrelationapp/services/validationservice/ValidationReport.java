@@ -130,7 +130,6 @@ public class ValidationReport {
             if (frameNumber == -1) {
                 return String.format("[%s] %s", fileName, message);
             }
-            // Formats execution time tracking down to a 4-decimal precision baseline
             return String.format("File: %s | Frame: %d | Time: %.4fs -> %s",
                     fileName, frameNumber, second, message);
         }

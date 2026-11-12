@@ -14,7 +14,6 @@ import java.nio.file.Path;
  */
 public class YamlReader {
 
-    // Reuse the mapper instance as a constant to avoid the heavy overhead of recreating it on every read
     private static final ObjectMapper MAPPER = new ObjectMapper(new YAMLFactory());
 
     /**

@@ -20,11 +20,7 @@ public class OpenCapParser implements Parser {
 
     private static final Pattern INT_PATTERN = Pattern.compile("^\\d+$");
     private static final Pattern DOUBLE_PATTERN = Pattern.compile("^\\d+\\.\\d+$");
-
-    // CRITICAL FIX: Erfasst ein oder mehrere Whitespace-Zeichen (Tabs ODER Leerzeichen) als kombinierten Trenner
     private static final Pattern WHITESPACE_SPLIT_PATTERN = Pattern.compile("\\s+");
-
-    // INGESTION-HARMONISIERUNG: Kanäle mit bekanntem 90°-Orientierungs-Offset zwischen OpenSim und Theia
     private static final Set<String> CHANNELS_WITH_90_DEGREE_OFFSET = Set.of(
             "pelvis_list",
             "lumbar_bending",
@@ -83,15 +79,12 @@ public class OpenCapParser implements Parser {
                 if (cleaned.equalsIgnoreCase("endheader")) {
                     inHeader = false;
 
-                    // The line immediately following "endheader" defines the column indices
                     String headerLine = br.readLine();
                     if (headerLine != null) {
-                        // CRITICAL FIX: Nutzt den robusten Whitespace-Trenner auf der getrimmten Zeile
                         String[] splitHeaders = WHITESPACE_SPLIT_PATTERN.split(headerLine.trim());
                         for (String h : splitHeaders) {
                             String trimmedH = h.trim();
                             if (!trimmedH.isEmpty()) {
-                                // Standardisiere den Zeit-Key auf Kleinschreibung, um Case-Fehler im ImportService zu blockieren
                                 if (trimmedH.equalsIgnoreCase("time")) {
                                     trimmedH = "time";
                                 }
@@ -118,19 +111,16 @@ public class OpenCapParser implements Parser {
                 }
             }
 
-            // Stage 2: Stream coordinate data rows
             while ((line = br.readLine()) != null) {
                 String cleaned = line.trim();
                 if (cleaned.isEmpty()) {
                     continue;
                 }
 
-                // CRITICAL FIX: Trimmt die Zeile vorab, damit führende Tabs kein leeres Token an Index 0 erzeugen
                 String[] values = WHITESPACE_SPLIT_PATTERN.split(cleaned);
 
-                // Takt-Validierung: Eine Zeile muss exakt so viele Werte haben wie der Header Spalten besitzt
                 if (values.length < headers.size()) {
-                    continue; // Überspringe korrupte oder unvollständige Zeilenfragmente
+                    continue;
                 }
 
                 for (int colIndex = 0; colIndex < headers.size(); colIndex++) {
@@ -143,7 +133,6 @@ public class OpenCapParser implements Parser {
                             num = Double.NaN;
                         } else {
                             num = Double.parseDouble(val);
-                            // Direct Ingestion Harmonization for Coordinate System Offsets
                             num = harmonizeCoordinateOffset(headerName, num);
                         }
 
@@ -152,7 +141,6 @@ public class OpenCapParser implements Parser {
                             columnData.add(num);
                         }
                     } catch (NumberFormatException e) {
-                        // Trage kontrolliert NaN ein, um die Zeilensynchronisation unter keinen Umständen zu verlieren
                         List<Double> columnData = motionData.getData().get(headerName);
                         if (columnData != null) {
                             columnData.add(Double.NaN);
@@ -175,7 +163,6 @@ public class OpenCapParser implements Parser {
         }
 
         if (CHANNELS_WITH_90_DEGREE_OFFSET.contains(channelName)) {
-            // Zieht die 90° Offset-Verschiebung ab und normalisiert in den Bereich [-180°, 180°]
             double corrected = rawAngle - 90.0;
             while (corrected < -180.0) corrected += 360.0;
             while (corrected > 180.0) corrected -= 360.0;

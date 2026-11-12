@@ -49,21 +49,18 @@ public class ExportService {
 
         try (BufferedWriter writer = Files.newBufferedWriter(outputPath, StandardCharsets.UTF_8)) {
 
-            // Header row: Movement, Joint, ICC_0...ICC_100, RMSE_0...RMSE_100
             StringBuilder header = new StringBuilder("Movement,Joint");
             for (int p = 0; p <= 100; p++) header.append(",ICC_").append(p);
             for (int p = 0; p <= 100; p++) header.append(",RMSE_").append(p);
             writer.write(header.toString());
             writer.newLine();
 
-            // Data rows: one row per movement-joint combination
             for (Movement movement : Movement.values()) {
                 for (Joints joint : Joints.values()) {
 
                     double[] iccArray = finalResults.getIccForJoint(movement, joint);
                     double[] rmseArray = finalResults.getRmseForJoint(movement, joint);
 
-                    // Skip combinations without recorded tracking metrics
                     if (iccArray == null || rmseArray == null) continue;
 
                     StringBuilder row = new StringBuilder();

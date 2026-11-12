@@ -28,7 +28,6 @@ public class LLLStrategy implements MovementStrategy {
             return fallback(frames);
         }
 
-        // Überprüfung, ob das linke Knie als primäres Signalband im Datensatz existiert
         boolean hasKneeL = frames.stream()
                 .anyMatch(f -> f.jointAngle().get(Joints.KNEE_ANGLE_L) != null);
 
@@ -36,7 +35,6 @@ public class LLLStrategy implements MovementStrategy {
             return fallback(frames);
         }
 
-        // 1. Tiefpunkt (Amortisationsphase / max. Flexion des linken Beins) ermitteln
         int bottomFrame = -1;
         double maxKneeAngle = Double.NEGATIVE_INFINITY;
 
@@ -52,7 +50,6 @@ public class LLLStrategy implements MovementStrategy {
             return fallback(frames);
         }
 
-        // 2. Stand-Baseline bestimmen (Erste 5% der Aufzeichnung)
         int baselineRange = Math.max(3, (int) (frames.size() * 0.05));
         double baselineKneeAngle = 0.0;
         int validKneeCount = 0;
@@ -66,14 +63,12 @@ public class LLLStrategy implements MovementStrategy {
         }
         baselineKneeAngle = validKneeCount > 0 ? baselineKneeAngle / validKneeCount : 0.0;
 
-        // 3. Bewegungsamplitude (ROM) und Schwellenwert berechnen
         double totalROM = maxKneeAngle - baselineKneeAngle;
         if (totalROM < 10.0) {
             return fallback(frames);
         }
         double thresholdAngle = baselineKneeAngle + (totalROM * ROM_ONSET_RATIO);
 
-        // 4. Startpunkt (Rückwärtssuche vom Tiefpunkt bis zum Unterschreiten des Schwellenwerts)
         int startFrame = 0;
         for (int i = bottomFrame; i >= 0; i--) {
             Double currentKnee = frames.get(i).jointAngle().get(Joints.KNEE_ANGLE_L);
@@ -83,7 +78,6 @@ public class LLLStrategy implements MovementStrategy {
             }
         }
 
-        // 5. Endpunkt (Vorwärtssuche vom Tiefpunkt bis zur Rückkehr unter den Schwellenwert)
         int endFrame = frames.size() - 1;
         for (int i = bottomFrame; i < frames.size(); i++) {
             Double currentKnee = frames.get(i).jointAngle().get(Joints.KNEE_ANGLE_L);
@@ -93,7 +87,6 @@ public class LLLStrategy implements MovementStrategy {
             }
         }
 
-        // Plausibilitäts-Guard
         if (startFrame >= endFrame) {
             return fallback(frames);
         }

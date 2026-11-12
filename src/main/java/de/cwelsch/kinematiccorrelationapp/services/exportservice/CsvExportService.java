@@ -57,8 +57,7 @@ public class CsvExportService {
         System.out.println("Export destination: " + csvPath.toAbsolutePath());
 
         // Präsenz-Map aufbauen wie im HTML-Export, um nur vorhandene Kombinationen zu exportieren.
-        // Zählt zusätzlich mit, wie viele der beitragenden Trials auf die Fensterfallback-
-        // Erkennung zurückgefallen sind (siehe TimeNormalizationService/MovementWindow).
+        // Zählt zusätzlich mit, wie viele der beitragenden Trials auf die Fensterfallback-Erkennung zurückgefallen sind (siehe TimeNormalizationService/MovementWindow).
         Map<Movement, Map<Joints, int[]>> activeCombinations = new HashMap<>(); // int[]{totalTrials, fallbackTrials}
 
         for (TrialSession session : trialSessions) {
@@ -80,7 +79,6 @@ public class CsvExportService {
         }
 
         try (BufferedWriter writer = Files.newBufferedWriter(csvPath, StandardCharsets.UTF_8)) {
-            // Header-Zeile schreiben
             writer.write(String.join(CSV_SEPARATOR,
                     "Bewegungsform",
                     "Anatomischer_Gelenkwinkel",
@@ -91,11 +89,9 @@ public class CsvExportService {
             ));
             writer.newLine();
 
-            // Äußere Schleife über Bewegungen
             for (Movement mv : MOVEMENT_ORDER) {
                 if (!activeCombinations.containsKey(mv)) continue;
 
-                // Innere Schleife über Gelenke (Proximal -> Distal)
                 for (Joints joint : JOINT_ORDER) {
                     if (!activeCombinations.get(mv).containsKey(joint)) continue;
 
@@ -106,10 +102,6 @@ public class CsvExportService {
                     DoubleSummaryStatistics iccStats = Arrays.stream(iccArray).filter(v -> !Double.isNaN(v)).summaryStatistics();
                     DoubleSummaryStatistics rmseStats = Arrays.stream(rmseArray).filter(v -> !Double.isNaN(v)).summaryStatistics();
 
-                    // CRITICAL FIX: Ein leerer Stream (alle 101 Punkte NaN, z.B. weil das Gelenk
-                    // überall zu viele fehlende Frames hatte) lieferte hier vorher getAverage()==0.0
-                    // -> täuschte fälschlich ein perfektes RMSE (0°) und ein katastrophales ICC (0.0)
-                    // vor, obwohl schlicht keine Daten vorlagen. Solche Zeilen werden jetzt übersprungen.
                     if (iccStats.getCount() == 0 || rmseStats.getCount() == 0) continue;
 
                     double aggregateIcc = iccStats.getAverage();
@@ -120,12 +112,9 @@ public class CsvExportService {
                     else if (aggregateIcc >= 0.40) validityText = "Moderat";
                     else validityText = "Mangelhaft";
 
-                    // (b) Sichtbarkeit der Fenster-Fallback-Quote: "2/8" bedeutet, dass 2 von 8
-                    // beitragenden Trials keine echte Bewegungsfenster-Erkennung erreicht haben.
                     int[] counts = activeCombinations.get(mv).get(joint);
                     String fallbackText = counts[1] + "/" + counts[0];
 
-                    // Zeile mit deutscher Lokalisierung schreiben (Komma statt Punkt für deutsches Excel)
                     String line = String.format(Locale.GERMAN, "%s%s%s%s%.4f%s%.2f%s%s%s%s",
                             mv.name(), CSV_SEPARATOR,
                             joint.getDisplayName(), CSV_SEPARATOR,

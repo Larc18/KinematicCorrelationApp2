@@ -40,7 +40,6 @@ public class BiomechanicalValidationService implements ValidationService<TrialSe
             String fileName = trial.getSourceFileName() != null ? trial.getSourceFileName() : "Unknown_File";
             List<FrameData> frames = trial.getFrameDataList();
 
-            // Tracking sets for cascading sequence errors (state locks preventing duplicate notifications)
             Set<Joints> activeKneeErrors = new HashSet<>();
             Set<Joints> activeHipErrors = new HashSet<>();
             Set<Joints> activeAnkleErrors = new HashSet<>();
@@ -49,13 +48,10 @@ public class BiomechanicalValidationService implements ValidationService<TrialSe
                 int frameNum = frame.frame();
                 double second = frame.second();
 
-                // Check 1: Knee Range-of-Motion (ROM) plausibility analysis
                 checkKneePlausibility(frame, report, fileName, frameNum, second, activeKneeErrors);
 
-                // Check 2: Hip flexion/extension plane alignment integrity
                 checkHipPlausibility(frame, report, fileName, frameNum, second, activeHipErrors);
 
-                // Check 3: Ankle dorsi-/plantarflexion plausibility analysis
                 checkAnklePlausibility(frame, report, fileName, frameNum, second, activeAnkleErrors);
             }
         }
@@ -69,9 +65,7 @@ public class BiomechanicalValidationService implements ValidationService<TrialSe
         for (Joints knee : knees) {
             Double angle = frame.jointAngle().get(knee);
 
-            // CRITICAL FIX: null UND NaN abfangen
             if (angle != null && !Double.isNaN(angle)) {
-                // Biomechanical bounds: Knee hyperextension under -10° or deep squad flexion over 165°
                 boolean isOutOfBounds = (angle < -10.0 || angle > 165.0);
 
                 if (isOutOfBounds) {
@@ -94,9 +88,7 @@ public class BiomechanicalValidationService implements ValidationService<TrialSe
         for (Joints hip : hipFlexions) {
             Double angle = frame.jointAngle().get(hip);
 
-            // CRITICAL FIX: null UND NaN abfangen
             if (angle != null && !Double.isNaN(angle)) {
-                // Biomechanical bounds: Hip hyperextension under -30° or maximum flexion compression over 145°
                 boolean isOutOfBounds = (angle < -30.0 || angle > 145.0);
 
                 if (isOutOfBounds) {
@@ -119,9 +111,7 @@ public class BiomechanicalValidationService implements ValidationService<TrialSe
         for (Joints ankle : ankles) {
             Double angle = frame.jointAngle().get(ankle);
 
-            // CRITICAL FIX: null UND NaN abfangen
             if (angle != null && !Double.isNaN(angle)) {
-                // Biomechanical bounds: Plantarflexion beyond -60° or dorsiflexion beyond 35°
                 boolean isOutOfBounds = (angle < -60.0 || angle > 35.0);
 
                 if (isOutOfBounds) {

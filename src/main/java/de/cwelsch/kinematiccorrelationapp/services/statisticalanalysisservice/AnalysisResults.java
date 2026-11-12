@@ -33,22 +33,9 @@ public class AnalysisResults {
     private final Map<MovementJointKey, double[]> iccResults = new HashMap<>();
     private final Map<MovementJointKey, double[]> rmseResults = new HashMap<>();
     private final Map<MovementJointKey, double[]> nrmseResults = new HashMap<>();
-
-    // Skalare Versatz-Kennwerte je Movement/Joint: mittlerer Bias (signierter Versatz
-    // OpenCap − Theia) und mittlerer zentrierter RMSE (RMSE nach Abzug des konstanten Versatzes),
-    // jeweils über die Probanden gemittelt. Bewusst Skalare statt 101-Punkte-Kurven: Bias und
-    // zentrierter RMSE entstehen pro Proband aus dessen kompletter Kurve über alle 101 Punkte.
     private final Map<MovementJointKey, Double> biasResults = new HashMap<>();
     private final Map<MovementJointKey, Double> rmseCenteredResults = new HashMap<>();
-
-    // Ein RMSE-Wert PRO PROBAND (Schlüssel: Participant.getId()), gemittelt über alle Movement/
-    // Joint-Kombinationen. Grundlage für einen Einstichproben-t-Test der Probanden-RMSE gegen
-    // einen fixen Referenzwert (z.B. 8°) — im Gegensatz zu den obigen Maps, die punktweise über
-    // die Kohorte gemittelte 101-Punkte-Kurven je Movement/Joint enthalten.
     private Map<String, Double> perParticipantMeanRmse = new HashMap<>();
-
-    // Analog zu perParticipantMeanRmse: EIN Bias-Wert bzw. EIN zentrierter RMSE-Wert PRO PROBAND
-    // (Schlüssel: Participant.getId()), gemittelt über alle Movement/Joint-Kombinationen.
     private Map<String, Double> perParticipantMeanBias = new HashMap<>();
     private Map<String, Double> perParticipantMeanRmseCentered = new HashMap<>();
 

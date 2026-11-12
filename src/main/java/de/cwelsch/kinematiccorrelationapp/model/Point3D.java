@@ -73,13 +73,8 @@ public class Point3D {
             return 0.0;
         }
 
-        // cos(theta) = (u * v) / (|u| * |v|)
         double cosTheta = vector1.dotProduct(vector2) / (mag1 * mag2);
-
-        // Numerischen Überlauf am Randbereich abfangen (z.B. 1.0000001 durch Rundung)
         cosTheta = Math.max(-1.0, Math.min(1.0, cosTheta));
-
-        // Umrechnung von Bogenmaß (Radians) in Grad (Degrees)
         return Math.toDegrees(Math.acos(cosTheta));
     }
 

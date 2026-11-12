@@ -28,7 +28,6 @@ public class ParticipantBuilder {
      * @return A fully populated Participant object entity, or null if instantiation fails.
      */
     public Participant build() {
-        // Validation boundary check before passing the path downstream
         if (metaDataURL == null || !Files.exists(metaDataURL)) {
             System.err.println("[Error] Cannot build participant: Metadata path is invalid or target file does not exist.");
             return null;
@@ -36,7 +35,6 @@ public class ParticipantBuilder {
 
         YamlReader yamlReader = new YamlReader();
 
-        // Using explicit absolute path transformation instead of raw String conversion
         String absolutePathString = metaDataURL.toAbsolutePath().toString();
         return yamlReader.readParticipant(absolutePathString);
     }

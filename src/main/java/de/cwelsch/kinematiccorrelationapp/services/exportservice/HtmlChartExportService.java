@@ -25,7 +25,6 @@ public class HtmlChartExportService {
 
     private final String targetFolderURL;
 
-    // Fixierte Reihenfolge für die Bewegungsformen gemäß sportwissenschaftlichem Protokoll
     private static final List<Movement> MOVEMENT_ORDER = List.of(
             Movement.SQUAT,
             Movement.COUNTERMOVEMENT_JUMP,
@@ -34,14 +33,10 @@ public class HtmlChartExportService {
             Movement.BECKEN_RUMPF_ROTATION
     );
 
-    // Fachlicher Analyseumfang der Studie: nur Hüfte/Knie/Sprunggelenk, siehe Joints.ANALYSIS_SCOPE.
     private static final List<Joints> JOINT_ORDER = Joints.ANALYSIS_SCOPE;
 
-    // Klinischer Referenzwert für die einseitige Prüfung der Pro-Proband-RMSE
-    // (H0: mu >= 8° vs. H1: mu < 8°).
     private static final double REFERENCE_THRESHOLD_DEGREES = 8.0;
 
-    // Laut Studienprotokoll drei Versuche je Proband und Bewegung.
     private static final int PLANNED_TRIALS_PER_MOVEMENT = 3;
 
     public HtmlChartExportService(String targetFolderURL) {
@@ -67,9 +62,6 @@ public class HtmlChartExportService {
         Map<Movement, Map<Joints, List<double[]>>> openCapAggregates = new HashMap<>();
         Map<Movement, Map<Joints, List<double[]>>> theiaAggregates = new HashMap<>();
 
-        // (b) Zählt pro Movement/Joint/System mit, wie viele der beitragenden Trials keine echte
-        // Bewegungsfenster-Erkennung erreicht haben und stattdessen auf den kompletten Trial
-        // zurückgefallen sind (int[]{totalTrials, fallbackTrials}).
         Map<Movement, Map<Joints, int[]>> openCapFallbackCounts = new HashMap<>();
         Map<Movement, Map<Joints, int[]>> theiaFallbackCounts = new HashMap<>();
 
@@ -134,13 +126,13 @@ public class HtmlChartExportService {
             writer.write("<div class=\"subtitle\">Validierungsstudie: OpenCap vs. Laborreferenz (Theia) | Berichtsstand: "
                     + dateStr + " | Geladene Sessions: " + trialSessions.size() + "</div>");
 
-            // ================= STAGE 1: PRO-PROBAND RMSE/BIAS UND HYPOTHESENPRÜFUNG =================
+            // STAGE 1: PRO-PROBAND RMSE/BIAS UND HYPOTHESENPRÜFUNG
             writePerParticipantRmseSection(writer,
                     statisticalResults.getPerParticipantMeanRmse(),
                     statisticalResults.getPerParticipantMeanBias(),
                     statisticalResults.getPerParticipantMeanRmseCentered());
 
-            // ================= STAGE 2: TABELLE (STRICKTE REIHENFOLGE + NRMSE + BIAS) =================
+            // STAGE 2: TABELLE (STRICKTE REIHENFOLGE + NRMSE + BIAS)
             writer.write("""
                             <h2>2. Mittlere statistische Gütekriterien je Bewegung und Gelenk (Tabelle 3)</h2>
                     """);
@@ -172,11 +164,9 @@ public class HtmlChartExportService {
                                 <tbody>
                     """);
 
-            // Äußere Schleife über die fixierte Bewegungsreihenfolge
             for (Movement mv : MOVEMENT_ORDER) {
                 if (!openCapAggregates.containsKey(mv)) continue;
 
-                // Innere Schleife über die proximal-distale Gelenkreihenfolge
                 for (Joints joint : JOINT_ORDER) {
                     if (!openCapAggregates.get(mv).containsKey(joint)) continue;
 
@@ -189,23 +179,15 @@ public class HtmlChartExportService {
                     DoubleSummaryStatistics iccStats = Arrays.stream(iccArray).filter(v -> !Double.isNaN(v)).summaryStatistics();
                     DoubleSummaryStatistics rmseStats = Arrays.stream(rmseArray).filter(v -> !Double.isNaN(v)).summaryStatistics();
 
-                    // CRITICAL FIX: Ein leerer Stream (alle 101 Punkte NaN) lieferte vorher
-                    // getAverage()==0.0 -> täuschte fälschlich ein perfektes RMSE (0°) und ein
-                    // katastrophales ICC (0.0) vor, obwohl schlicht keine Daten vorlagen.
                     if (iccStats.getCount() == 0 || rmseStats.getCount() == 0) continue;
 
                     double aggregateIcc = iccStats.getAverage();
                     double aggregateRmse = rmseStats.getAverage();
                     double aggregateNrmse = (nrmseArray != null) ? Arrays.stream(nrmseArray).filter(v -> !Double.isNaN(v)).summaryStatistics().getAverage() : 0.0;
 
-                    // Bias/zentrierter RMSE sind Skalare (pro Proband über die Zeitachse gebildet,
-                    // dann über die Kohorte gemittelt) und können fehlen, wenn für diese
-                    // Movement/Joint-Kombination kein gematchtes OpenCap/Theia-Kurvenpaar vorlag.
                     String biasText = formatSignedDegrees(statisticalResults.getBiasForJoint(mv, joint));
                     String rmseCenteredText = formatDegrees(statisticalResults.getRmseCenteredForJoint(mv, joint));
 
-                    // (b) Fenster-Fallback-Quote über beide Systeme hinweg sichtbar machen, statt
-                    // sie stillschweigend in der Aggregation verschwinden zu lassen.
                     int[] ocCounts = openCapFallbackCounts.getOrDefault(mv, Map.of()).getOrDefault(joint, new int[2]);
                     int[] thCounts = theiaFallbackCounts.getOrDefault(mv, Map.of()).getOrDefault(joint, new int[2]);
                     int fallbackTrials = ocCounts[1] + thCounts[1];
@@ -231,17 +213,13 @@ public class HtmlChartExportService {
             }
             writer.write("</tbody></table>");
 
-            // ================= STAGE 3: TRAJEKTORIEN (STRIKTE REIHENFOLGE) =================
+            // STAGE 3: TRAJEKTORIEN (STRIKTE REIHENFOLGE)
             writer.write("<h2>3. Parallele Gelenkwinkel-Trajektorien im inter-systemischen Vergleich</h2>");
 
-            // Äußere Grafiken-Schleife über die fixierte Bewegungsreihenfolge
             for (Movement mv : MOVEMENT_ORDER) {
                 if (!openCapAggregates.containsKey(mv)) continue;
                 Map<Joints, List<double[]>> jointMap = openCapAggregates.get(mv);
 
-                // Innere Grafiken-Schleife über die Gelenkreihenfolge (bereits auf Hüfte/Knie/
-                // Sprunggelenk begrenzt durch JOINT_ORDER = Joints.ANALYSIS_SCOPE — eine
-                // zusätzliche Pro-Movement-Filterung ist daher nicht mehr nötig)
                 for (Joints joint : JOINT_ORDER) {
                     if (!jointMap.containsKey(joint)) continue;
 
@@ -271,7 +249,6 @@ public class HtmlChartExportService {
                     int nOC = ocTrials.size();
                     int nTH = (thTrials != null) ? thTrials.size() : 0;
 
-                    // (b) Fensterfallback-Quote je System, direkt neben der Trial-Anzahl sichtbar.
                     int[] ocFallback = openCapFallbackCounts.getOrDefault(mv, Map.of()).getOrDefault(joint, new int[2]);
                     int[] thFallback = theiaFallbackCounts.getOrDefault(mv, Map.of()).getOrDefault(joint, new int[2]);
 

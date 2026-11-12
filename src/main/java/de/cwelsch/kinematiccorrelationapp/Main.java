@@ -34,7 +34,6 @@ public class Main extends Application {
 
         Scene scene = new Scene(fxmlLoader.load(), WINDOW_WIDTH, WINDOW_HEIGHT);
 
-        // configuration of window
         stage.setTitle("Kinematic Correlation Application");
         stage.setScene(scene);
 

@@ -63,14 +63,12 @@ public class MainMenuController {
             File droppedFile = db.getFiles().get(0);
 
             if (event.getSource() == folderDropOff && droppedFile.isDirectory()) {
-                // getAbsolutePath() unifies native formatting targets without 'file:' URI prefixes
                 this.folderURL = droppedFile.getAbsolutePath();
                 success = true;
 
-                // Visual drop feedback coloring state change
+
                 this.folderDropOff.setBackground(Background.fill(Color.web("#adadad")));
 
-                // Safely update file label description text elements directly inside the target layout node
                 if (!this.folderDropOff.getChildren().isEmpty() && this.folderDropOff.getChildren().get(0) instanceof Label label) {
                     String folderName = Paths.get(this.folderURL).getFileName().toString();
                     label.setText(folderName);
@@ -133,13 +131,11 @@ public class MainMenuController {
             return;
         }
 
-        // Offloading pipeline tracking computation onto a separate background worker thread
         Thread backgroundWorker = new Thread(() -> {
             try {
                 ProcessOrchestrator orchestrator = new ProcessOrchestrator(this.folderURL);
                 orchestrator.start();
 
-                // Safely delegate interface state resets back onto the main platform UI execution loop thread
                 Platform.runLater(() -> System.out.println("Processing task run finished. UI synchronization successfully locked."));
 
             } catch (IOException e) {

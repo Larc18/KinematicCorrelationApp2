@@ -17,13 +17,8 @@ import java.util.List;
  */
 public class CMJStrategy implements MovementStrategy {
 
-    private static final double ROM_ONSET_RATIO = 0.05; // 5% Schwellenwert der Beuge-Amplitude
-    private static final double MIN_PELVIS_ROM_METERS = 0.03; // Mindestamplitude für einen echten Sprung (Meter, nicht Grad!)
-    // CRITICAL FIX: War vorher ein hartes "+20 Frames" — bei OpenCap (60Hz) 0,333s, bei Theia
-    // (85Hz) nur 0,235s. Das widerspricht der in TimeNormalizationService dokumentierten
-    // Framerate-Unabhängigkeit: Beide Systeme sollen für dieselbe Wartezeit vor der Landungssuche
-    // denselben Zeitraum überspringen, nicht dieselbe Frame-Anzahl. Referenzwert 20/85s beibehalten
-    // (der ursprünglich beabsichtigte Wert bei Theias 85Hz), aber jetzt pro Trial in Frames umgerechnet.
+    private static final double ROM_ONSET_RATIO = 0.05;
+    private static final double MIN_PELVIS_ROM_METERS = 0.03;
     private static final double LANDING_SEARCH_BUFFER_SECONDS = 20.0 / 85.0;
 
     /**
@@ -46,9 +41,6 @@ public class CMJStrategy implements MovementStrategy {
             return kneeWindow;
         }
 
-        // OpenCap-Ersatzpfad: Keine brauchbaren Kniewinkel vorhanden -> versuche die
-        // vertikale Beckentranslation (PELVIS_TY) als Ersatzsignal, bevor endgültig
-        // auf den kompletten Trial zurückgefallen wird.
         MovementWindow pelvisWindow = findWindowViaPelvis(frames);
         if (!pelvisWindow.fallbackUsed()) {
             return pelvisWindow;
@@ -61,7 +53,6 @@ public class CMJStrategy implements MovementStrategy {
      * Theia-Pfad: Fenster-Erkennung über KNEE_ANGLE_R/L (bevorzugt rechtes Knie).
      */
     private MovementWindow findWindowViaKnee(List<FrameData> frames) {
-        // 1. Suche nach dem ersten Beuge-Peak (Countermovement-Tiefpunkt vor dem Abstoß)
         int countermovementPeakFrame = -1;
         double maxCountermovementKnee = Double.NEGATIVE_INFINITY;
 
@@ -80,7 +71,6 @@ public class CMJStrategy implements MovementStrategy {
             return fallback(frames);
         }
 
-        // 2. Bestimme die Stand-Baseline (Erste 5% der Frames)
         int baselineRange = Math.max(3, (int) (frames.size() * 0.05));
         double baselineAngle = 0.0;
         int validBaselineCount = 0;
@@ -94,14 +84,12 @@ public class CMJStrategy implements MovementStrategy {
         }
         baselineAngle = validBaselineCount > 0 ? baselineAngle / validBaselineCount : 0.0;
 
-        // 3. Bewegungsamplitude (ROM) und 5%-Schwellenwert
         double totalROM = maxCountermovementKnee - baselineAngle;
         if (totalROM < 10.0) {
             return fallback(frames);
         }
         double thresholdAngle = baselineAngle + (totalROM * ROM_ONSET_RATIO);
 
-        // 4. Startpunkt (Rückwärtssuche vor dem Countermovement-Peak)
         int startFrame = 0;
         for (int i = countermovementPeakFrame; i >= 0; i--) {
             Double val = frames.get(i).jointAngle().get(Joints.KNEE_ANGLE_R);
@@ -111,11 +99,9 @@ public class CMJStrategy implements MovementStrategy {
             }
         }
 
-        // 5. Suche nach dem zweiten Beuge-Peak (Landung nach der Flugphase)
         int landingPeakFrame = countermovementPeakFrame;
         double maxLandingKnee = Double.NEGATIVE_INFINITY;
 
-        // Suche ab LANDING_SEARCH_BUFFER_SECONDS nach dem Countermovement-Peak nach dem Landungspeak
         int searchStart = frameOffsetForBuffer(frames, countermovementPeakFrame);
         for (int i = searchStart; i < frames.size(); i++) {
             Double kneeR = frames.get(i).jointAngle().get(Joints.KNEE_ANGLE_R);
@@ -128,7 +114,6 @@ public class CMJStrategy implements MovementStrategy {
             }
         }
 
-        // 6. Endpunkt (Vorwärtssuche nach der Lande-Stabilisierung)
         int endFrame = frames.size() - 1;
         for (int i = landingPeakFrame; i < frames.size(); i++) {
             Double val = frames.get(i).jointAngle().get(Joints.KNEE_ANGLE_R);
@@ -167,7 +152,6 @@ public class CMJStrategy implements MovementStrategy {
             return fallback(frames);
         }
 
-        // 1. Stand-Baseline bestimmen (Erste 5% der Aufzeichnung)
         int baselineRange = Math.max(3, (int) (frames.size() * 0.05));
         double baselineY = 0.0;
         int validBaselineCount = 0;
@@ -184,8 +168,6 @@ public class CMJStrategy implements MovementStrategy {
         }
         baselineY /= validBaselineCount;
 
-        // 2. Globale Amplitude ermitteln, um eine Rauschgrenze zu definieren, unterhalb
-        // derer eine Abweichung von der Baseline nicht als eigenständige Bewegungsphase zählt.
         double globalMaxAbsDeviation = 0.0;
         for (FrameData frame : frames) {
             Double val = frame.jointAngle().get(Joints.PELVIS_TY);
@@ -198,7 +180,6 @@ public class CMJStrategy implements MovementStrategy {
         }
         double noiseFloor = globalMaxAbsDeviation * ROM_ONSET_RATIO;
 
-        // 3. Erste signifikante Kauer-Exkursion suchen (Countermovement-Tiefpunkt)
         int countermovementPeakFrame = -1;
         double maxCrouchDepth = 0.0;
         boolean inExcursion = false;
@@ -206,7 +187,7 @@ public class CMJStrategy implements MovementStrategy {
         for (int i = 0; i < frames.size(); i++) {
             Double val = frames.get(i).jointAngle().get(Joints.PELVIS_TY);
             if (val == null || Double.isNaN(val)) continue;
-            double depth = baselineY - val; // positiv = unterhalb der Baseline (Kauern)
+            double depth = baselineY - val;
 
             if (!inExcursion) {
                 if (depth > noiseFloor) {
@@ -220,7 +201,7 @@ public class CMJStrategy implements MovementStrategy {
                     countermovementPeakFrame = i;
                 }
                 if (depth <= noiseFloor) {
-                    break; // Exkursion beendet, Peak steht fest
+                    break;
                 }
             }
         }
@@ -231,7 +212,6 @@ public class CMJStrategy implements MovementStrategy {
 
         double thresholdDepth = maxCrouchDepth * ROM_ONSET_RATIO;
 
-        // 4. Startpunkt (Rückwärtssuche vor dem Countermovement-Peak)
         int startFrame = 0;
         for (int i = countermovementPeakFrame; i >= 0; i--) {
             Double val = frames.get(i).jointAngle().get(Joints.PELVIS_TY);
@@ -241,9 +221,6 @@ public class CMJStrategy implements MovementStrategy {
             }
         }
 
-        // 5. Suche nach der Landung (zweite, spätere Kauer-Exkursion nach der Flugphase).
-        // Die Flugphase liefert negative "Tiefen" (Becken über der Baseline) und wird von
-        // dieser Maximum-Suche automatisch übersprungen.
         int landingPeakFrame = countermovementPeakFrame;
         double maxLandingDepth = Double.NEGATIVE_INFINITY;
 
@@ -258,7 +235,6 @@ public class CMJStrategy implements MovementStrategy {
             }
         }
 
-        // 6. Endpunkt (Vorwärtssuche nach der Lande-Stabilisierung)
         int endFrame = frames.size() - 1;
         for (int i = landingPeakFrame; i < frames.size(); i++) {
             Double val = frames.get(i).jointAngle().get(Joints.PELVIS_TY);

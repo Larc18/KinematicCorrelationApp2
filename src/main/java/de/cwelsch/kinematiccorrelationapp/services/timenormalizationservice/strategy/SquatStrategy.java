@@ -28,7 +28,6 @@ public class SquatStrategy implements MovementStrategy {
             return fallback(frames);
         }
 
-        // 1. Suche die maximale Kniebeugung (Tiefster Punkt / Bottom Frame)
         int peakFrame = -1;
         double maxKneeAngle = Double.NEGATIVE_INFINITY;
 
@@ -36,7 +35,6 @@ public class SquatStrategy implements MovementStrategy {
             Double kneeR = frames.get(i).jointAngle().get(Joints.KNEE_ANGLE_R);
             Double kneeL = frames.get(i).jointAngle().get(Joints.KNEE_ANGLE_L);
 
-            // Bevorzuge rechtes Knie, nutze links als Fallback
             Double currentVal = (kneeR != null && !Double.isNaN(kneeR)) ? kneeR : kneeL;
 
             if (currentVal != null && !Double.isNaN(currentVal) && currentVal > maxKneeAngle) {
@@ -45,11 +43,10 @@ public class SquatStrategy implements MovementStrategy {
             }
         }
 
-        if (peakFrame == -1 || maxKneeAngle < 20.0) { // Kein gültiger Squat erkennbar
+        if (peakFrame == -1 || maxKneeAngle < 20.0) {
             return fallback(frames);
         }
 
-        // 2. Bestimme den Stand-Baseline-Winkel (Mittelwert der ersten 5% der Aufzeichnung)
         int baselineRange = Math.max(3, (int) (frames.size() * 0.05));
         double baselineAngle = 0.0;
         int validBaselineCount = 0;
@@ -63,16 +60,13 @@ public class SquatStrategy implements MovementStrategy {
         }
         baselineAngle = validBaselineCount > 0 ? baselineAngle / validBaselineCount : 0.0;
 
-        // 3. Berechne die absolute Bewegungsamplitude (ROM)
         double totalROM = maxKneeAngle - baselineAngle;
-        if (totalROM < 15.0) { // Zu geringe Amplitude
+        if (totalROM < 15.0) {
             return fallback(frames);
         }
 
-        // Schwellenwert für Start & Ende: Baseline + 5% der Amplitude
         double thresholdAngle = baselineAngle + (totalROM * ROM_ONSET_RATIO);
 
-        // 4. Rückwärtssuche vom Peak zum Start (5% Threshold)
         int startFrame = 0;
         for (int i = peakFrame; i >= 0; i--) {
             Double val = frames.get(i).jointAngle().get(Joints.KNEE_ANGLE_R);
@@ -82,7 +76,6 @@ public class SquatStrategy implements MovementStrategy {
             }
         }
 
-        // 5. Vorwärtssuche vom Peak zum Ende (5% Threshold)
         int endFrame = frames.size() - 1;
         for (int i = peakFrame; i < frames.size(); i++) {
             Double val = frames.get(i).jointAngle().get(Joints.KNEE_ANGLE_R);
@@ -92,7 +85,6 @@ public class SquatStrategy implements MovementStrategy {
             }
         }
 
-        // Sicherheitsprüfungen
         if (startFrame >= endFrame) {
             return fallback(frames);
         }

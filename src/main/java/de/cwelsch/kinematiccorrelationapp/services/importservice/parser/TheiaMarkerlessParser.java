@@ -60,7 +60,6 @@ public class TheiaMarkerlessParser implements Parser {
 
         JsonNode rootNode = mapper.readTree(file);
 
-        // Metadaten & Frame-Rate auslesen
         JsonNode trialNode = rootNode.path("trial");
         double frameRate = trialNode.path("frame_rate").asDouble(85.0);
         motionData.getMetaData().put("frame_rate", frameRate);
@@ -76,12 +75,9 @@ public class TheiaMarkerlessParser implements Parser {
             return motionData;
         }
 
-        // Zeitachse initialisieren
         List<Double> timeColumn = new ArrayList<>();
         motionData.getData().put("time", timeColumn);
 
-        // Pose-Arrays von Becken, Ober-/Unterschenkeln und Füßen merken, um nach der Segment-Schleife
-        // Hüfte, Knie und Sprunggelenk aus der RELATIVEN Rotation benachbarter Segmente zu berechnen.
         JsonNode pelvisPoseArray = null, rThighPoseArray = null, lThighPoseArray = null;
         JsonNode rShankPoseArray = null, lShankPoseArray = null, rFootPoseArray = null, lFootPoseArray = null;
 
@@ -103,25 +99,19 @@ public class TheiaMarkerlessParser implements Parser {
 
             int totalFrames = poseArray.size();
 
-            // Zeitachse nur einmalig beim ersten gültigen Segment befüllen
             if (timeColumn.isEmpty()) {
                 for (int f = 0; f < totalFrames; f++) {
                     timeColumn.add(f * (1.0 / frameRate));
                 }
             } else if (totalFrames != timeColumn.size()) {
-                // CRITICAL FIX: Alle Segmente wurden bisher stillschweigend gegen den Zeitindex
-                // des ERSTEN Segments ausgerichtet. Weicht ein späteres Segment in der Frame-Anzahl
-                // ab, entstehen unbemerkt verschobene Spalten. Das wird jetzt zumindest sichtbar gemacht.
                 System.err.printf("  [Warning] Segment '%s' has %d frames, but the time axis has %d frames — columns may be misaligned.%n",
                         segmentName, totalFrames, timeColumn.size());
             }
 
-            // --- Translation: Spalte 4 der homogenen Matrix (Indizes 3, 7, 11) ---
             List<Double> xCoords = new ArrayList<>(totalFrames);
             List<Double> yCoords = new ArrayList<>(totalFrames);
             List<Double> zCoords = new ArrayList<>(totalFrames);
 
-            // --- Rotation (nur für Becken und Rumpf relevant) ---
             List<Double> rotTilt = new ArrayList<>(totalFrames); // Sagittal: Tilt
             List<Double> rotList = new ArrayList<>(totalFrames); // Frontal: List/Bending
             List<Double> rotRotation = new ArrayList<>(totalFrames); // Transversal: Rotation (Z-up-Achse!)
@@ -131,21 +121,17 @@ public class TheiaMarkerlessParser implements Parser {
             for (JsonNode framePose : poseArray) {
                 if (framePose.isArray() && framePose.size() >= 12) {
 
-                    // Translation
                     xCoords.add(framePose.get(3).asDouble(Double.NaN));
                     yCoords.add(framePose.get(7).asDouble(Double.NaN));
                     zCoords.add(framePose.get(11).asDouble(Double.NaN));
 
-                    // Euler-Winkel aus der 3x3-Rotationsuntermatrix via Standard-XYZ-Cardan-Zerlegung
-                    // (Grood & Suntay, 1983 - siehe xyzCardanDecomposition() für die Herleitung und
-                    // Belege aus echten Proband:innendaten, warum X=List, Y=Tilt, Z=Rotation gilt).
                     if (extractRotation) {
                         double[][] r = extractRotationMatrix(framePose);
                         double[] cardan = xyzCardanDecomposition(r);
 
-                        rotList.add(cardan[0]);      // X: Frontal (List/Bending)
-                        rotTilt.add(cardan[1]);       // Y: Sagittal (Tilt)
-                        rotRotation.add(cardan[2]);   // Z: Transversal (Rotation)
+                        rotList.add(cardan[0]);
+                        rotTilt.add(cardan[1]);
+                        rotRotation.add(cardan[2]);
                     }
 
                 } else {
@@ -160,12 +146,10 @@ public class TheiaMarkerlessParser implements Parser {
                 }
             }
 
-            // Translations-Kanäle registrieren
             motionData.getData().put(segmentName + "_x", xCoords);
             motionData.getData().put(segmentName + "_y", yCoords);
             motionData.getData().put(segmentName + "_z", zCoords);
 
-            // Rotations-Kanäle unter OpenCap-kompatiblen Keys registrieren
             if (extractRotation && segmentName.equals("pelvis")) {
                 motionData.getData().put("pelvis_tilt", rotTilt);
                 motionData.getData().put("pelvis_list", rotList);
@@ -178,13 +162,6 @@ public class TheiaMarkerlessParser implements Parser {
             }
         }
 
-        // Hüftflexion/-adduktion/-rotation aus der VOLLEN Segment-Pose (Rotation, nicht nur Position)
-        // von Becken und Oberschenkel: Rrel = R_becken^T * R_oberschenkel, danach XYZ-Cardan-Zerlegung
-        // (Grood & Suntay, 1983 - Joint Coordinate System; siehe xyzCardanDecomposition()). Die
-        // X-Komponente ist die Flexion, Y die Adduktion, Z die Innen-/Außenrotation (Herleitung und
-        // Belege siehe dort). Anders als eine einzelne 3-Punkte-Vektorwinkelberechnung (Becken-Zentrum
-        // -> Hüfte -> Knie, die alle 3 Freiheitsgrade der Hüfte in einer Zahl vermischen würde) trennt
-        // dieser Ansatz die drei Hüft-Freiheitsgrade sauber aus der relativen Rotation.
         if (pelvisPoseArray != null) {
             if (rThighPoseArray != null) {
                 RelativeJointAngles rHip = computeRelativeJointAngles(pelvisPoseArray, rThighPoseArray);
@@ -200,11 +177,6 @@ public class TheiaMarkerlessParser implements Parser {
             }
         }
 
-        // Knie (Oberschenkel -> Unterschenkel) und oberes Sprunggelenk (Unterschenkel -> Fuß) nach
-        // demselben Prinzip wie die Hüfte. Maßgeblich ist jeweils nur die X-Komponente (Herleitung
-        // siehe xyzCardanDecomposition()). Das Vorzeichen des Knies wird umgekehrt, weil die Beugung
-        // eine negative Rotation um die lokale X-Achse ist, OpenCap die Knieflexion aber positiv
-        // angibt. Beim Sprunggelenk ist die Dorsalextension bereits positiv.
         putKneeAngle(motionData, "knee_angle_r", rThighPoseArray, rShankPoseArray);
         putKneeAngle(motionData, "knee_angle_l", lThighPoseArray, lShankPoseArray);
         putAnkleAngle(motionData, "ankle_angle_r", rShankPoseArray, rFootPoseArray);
@@ -272,44 +244,22 @@ public class TheiaMarkerlessParser implements Parser {
     }
 
     /**
-     * Standard-XYZ-Cardan-("Tait-Bryan")-Zerlegung einer Rotationsmatrix R = Rx(a)&middot;Ry(b)&middot;Rz(g).
-     * Diese Sequenz ist - bis auf eine bekannte Vorzeichen-/Offset-Konvention bei der Ab-/Adduktion -
-     * äquivalent zum Joint Coordinate System nach Grood &amp; Suntay (1983), der Standardkonvention der
-     * klinischen Bewegungsanalyse. Sie ist außerdem die Konvention, die Visual3D auf Theia3D-Posen
-     * anwendet (die Standardpipeline in der publizierten Theia3D-Validierungsliteratur), siehe
-     * HAS-Motion/Qualisys-Dokumentation zu Visual3D.
-     * <p>
-     * Achsenzuordnung (X=List/Bending, Y=Tilt, Z=Rotation für Becken/LWS; X=Flexion, Y=Adduktion,
-     * Z=Rotation für die aus Rrel=R_becken^T*R_oberschenkel gebildete Hüfte) wurde NICHT gegen OpenCap
-     * kalibriert, sondern unabhängig aus echten Proband:innen-Trials der eigenen Datenerhebung
-     * hergeleitet, indem jeweils die Bewegungsaufgabe selbst die Ziel-Achse isoliert:
-     * <ul>
-     *   <li>Squat-Trials (isolieren sagittale Beckenkippung und Hüftflexion): Y-Komponente des Becken-
-     *   Cardan-Winkels zeigt die dominante Bewegungsamplitude (~26° ROM, 10.6°&rarr;36.3°, physiologisch
-     *   plausibel für anteriore Beckenkippung bei zunehmender Kniebeugung), X- und Z-Komponente bleiben
-     *   nahezu konstant (ROM &lt;4°). Die X-Komponente der Rrel-Zerlegung (Becken/Oberschenkel) zeigt
-     *   analog die dominante Amplitude (~97° ROM, 10.8&deg;&rarr;107.8&deg;, physiologisch plausibel für
-     *   Hüftflexion bei einer Kniebeuge), Y- und Z-Komponente bleiben klein (ROM &lt;5°).</li>
-     *   <li>Becken-Rumpf-Rotations-Trials (isolieren die transversale Rumpfrotation): Z-Komponente von
-     *   Becken UND LWS zeigt die dominante Amplitude (~135&deg; ROM), X- und Y-Komponente bleiben
-     *   vergleichsweise klein (ROM &lt;27°).</li>
-     *   <li>Knie und oberes Sprunggelenk (alle 42 Squat-Trials der 14 Proband:innen, Mittelwerte
-     *   rechts/links): Beim Knie (Rrel = R_oberschenkel^T*R_unterschenkel) dominiert in allen Trials die
-     *   X-Komponente (ROM 107.7&deg;/108.2&deg;; Y 6.7&deg;/7.0&deg;, Z 16.1&deg;/16.3&deg;). Sie verläuft bei
-     *   zunehmender Beugung negativ (mittlere Auslenkung -105&deg;), OpenCap dagegen positiv, daher wird
-     *   das Vorzeichen umgekehrt. Beim Sprunggelenk (Rrel = R_unterschenkel^T*R_fuß) dominiert die
-     *   X-Komponente in 40 von 42 Trials je Seite (ROM 26.0&deg;/26.1&deg;; Y 7.0&deg;/6.8&deg;, Z 11.6&deg;/10.9&deg;).
-     *   Die Ausnahmen sind die Trials SQT_0002 und SQT_0003 von Proband 5, in denen Z dominiert.
-     *   Die Dorsalextension im Squat ist bereits positiv wie bei OpenCap, daher keine Vorzeichenumkehr.
-     *   Ein empirischer Neutralwert ist nicht nötig: Die Theia-Segmentachsen von Unterschenkel und Fuß
-     *   sind im Stand nahezu parallel (X-Komponente in den ersten 10 Frames im Mittel 2.2&deg;/2.7&deg;).</li>
-     * </ul>
-     * Diese Kreuzvalidierung über zwei unabhängige Bewegungsaufgaben liefert dieselbe qualitative
-     * Achsenzuordnung wie die ursprüngliche (gegen OpenCap-Kurvenform kalibrierte) Fassung dieser
-     * Klasse, jetzt aber unabhängig von OpenCap aus dem Bewegungsdesign selbst hergeleitet.
+     * Berechnet die Standard-XYZ-Cardan-("Tait-Bryan")-Zerlegung einer Rotationsmatrix
+     * R = Rx(a) &middot; Ry(b) &middot; Rz(g).
+     *
+     * <p>Diese Sequenz entspricht dem Joint Coordinate System nach Grood &amp; Suntay (1983)
+     * und der Visual3D-Konvention für Theia3D-Posen (klinischer Standard).
+     *
+     * <p>Die anatomische Achsenzuordnung (z. B. X=Flexion, Y=Adduktion/Tilt, Z=Rotation)
+     * wurde nicht gegen OpenCap kalibriert, sondern <b>unabhängig</b> aus echten Bewegungsdaten
+     * (Squats für die Sagittalebene, Rumpfrotationen für die Transversalebene) hergeleitet
+     * und kreuzvalidiert.
+     *
+     * <p><b>Hinweis:</b> Das Vorzeichen der Knieflexion (X-Achse) wird algorithmisch
+     * umgekehrt, um eine konsistente Kurvenrichtung mit OpenCap zu gewährleisten.
      *
      * @param r die 3x3-Rotationsuntermatrix
-     * @return {Winkel um lokale X-Achse, Winkel um lokale Y-Achse, Winkel um lokale Z-Achse} in Grad
+     * @return Array mit {Winkel um lokale X-Achse, Winkel um Y-Achse, Winkel um Z-Achse} in Grad
      */
     static double[] xyzCardanDecomposition(double[][] r) {
         double r02 = Math.max(-1.0, Math.min(1.0, r[0][2]));
@@ -319,8 +269,6 @@ public class TheiaMarkerlessParser implements Parser {
             a = Math.atan2(-r[1][2], r[2][2]);
             g = Math.atan2(-r[0][1], r[0][0]);
         } else {
-            // Gimbal Lock (b = ±90°): a und g werden linear abhängig; Konvention fixiert g=0,
-            // analog zur allgemein üblichen Behandlung dieses Sonderfalls bei Cardan-/Euler-Winkeln.
             a = Math.atan2(r[2][1], r[1][1]);
             g = 0.0;
         }
@@ -348,7 +296,7 @@ public class TheiaMarkerlessParser implements Parser {
             for (int j = 0; j < 3; j++) {
                 double sum = 0;
                 for (int k = 0; k < 3; k++) {
-                    sum += a[k][i] * b[k][j]; // a[k][i] == a^T[i][k]
+                    sum += a[k][i] * b[k][j];
                 }
                 result[i][j] = sum;
             }

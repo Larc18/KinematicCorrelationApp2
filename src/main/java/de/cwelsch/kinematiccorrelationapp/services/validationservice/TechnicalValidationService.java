@@ -15,8 +15,6 @@ import java.util.Set;
  */
 public class TechnicalValidationService implements ValidationService<TrialSession> {
 
-    // Deckt sich bewusst mit Joints.ANALYSIS_SCOPE (Hüfte/Knie/Sprunggelenk) — nur Winkel,
-    // die tatsächlich in Statistik/Export landen, werden auch kritisch validiert.
     private static final Set<Joints> CRITICAL_JOINTS = Set.copyOf(Joints.ANALYSIS_SCOPE);
 
     /**
@@ -52,22 +50,17 @@ public class TechnicalValidationService implements ValidationService<TrialSessio
                         "Critical Failure: Data file tracking layer extracted but contains empty frame metrics.",
                         fileName, -1, 0.0
                 );
-                // CRITICAL FIX (a): Trials mit kritischen Fehlern werden ab sofort aus der
-                // weiteren Normalisierung/Statistik ausgeschlossen statt nur geloggt zu werden.
                 trial.markExcluded("Empty frame metrics");
                 continue;
             }
 
-            // Hole den realen Startframe der Datei als dynamische Baseline
             int expectedFrameNumber = frames.get(0).frame();
             double expectedTime = frames.get(0).second();
 
-            // Angenommene Framerate dynamisch aus den ersten zwei Frames ermitteln (~60Hz -> ~0.0166s)
             double deltaTimeBaseline = (frames.size() > 1) ? (frames.get(1).second() - frames.get(0).second()) : 0.0166;
 
             for (FrameData frame : frames) {
 
-                // Check 1: Strukturelle Frame-Lücke detektieren
                 if (frame.frame() != expectedFrameNumber) {
                     int missingFrames = frame.frame() - expectedFrameNumber;
 
@@ -84,15 +77,12 @@ public class TechnicalValidationService implements ValidationService<TrialSessio
                         );
                         trial.markExcluded(String.format("Out-of-order/duplicate frame at frame %d", frame.frame()));
                     }
-                    // Synchronisiere Erwartungshorizont wieder auf den aktuellen realen Frame
                     expectedFrameNumber = frame.frame();
                 }
 
-                // Check 2: Gelenkwinkel auf Vorhandensein UND numerische Gültigkeit (NaN) prüfen
                 for (Joints criticalJoint : CRITICAL_JOINTS) {
                     Double angle = frame.jointAngle().get(criticalJoint);
 
-                    // CRITICAL FIX: fängt jetzt null UND NaN-Werte aus den MoCap-Systemen ab
                     if (angle == null || Double.isNaN(angle)) {
                         report.addWarning(
                                 "Mandatory coordinate tracking cell for [" + criticalJoint.name() + "] is missing or invalid (NaN).",
@@ -101,7 +91,6 @@ public class TechnicalValidationService implements ValidationService<TrialSessio
                     }
                 }
 
-                // Erwartungswerte für den nächsten Schleifendurchlauf inkrementieren
                 expectedFrameNumber++;
                 expectedTime += deltaTimeBaseline;
             }

@@ -121,7 +121,6 @@ public class Trial {
         return isOpenCap;
     }
 
-    // --- Datenqualität: Ausschluss aus der Statistik bei kritischen Validierungsfehlern ---
     private boolean excluded = false;
     private String exclusionReason = null;
 
@@ -147,8 +146,6 @@ public class Trial {
         return exclusionReason;
     }
 
-    // --- Bewegungsfenster-Erkennung: Kennzeichnet, ob die MovementStrategy auf den
-    //     kompletten Trial zurückfallen musste, statt ein echtes Bewegungsfenster zu erkennen ---
     private boolean windowFallbackUsed = false;
 
     public void setWindowFallbackUsed(boolean windowFallbackUsed) {

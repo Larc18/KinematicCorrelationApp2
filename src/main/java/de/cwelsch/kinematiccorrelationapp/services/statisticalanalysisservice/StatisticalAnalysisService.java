@@ -20,23 +20,9 @@ import java.util.Map;
 public class StatisticalAnalysisService {
 
     private static final int NORMALIZED_TIMELINE_POINTS = 101;
-    // Fenstergröße für die punktweise ICC-Glättung entlang der 101-Punkte-Zeitachse (zentrierter
-    // gleitender Mittelwert, ±2 Punkte). Reduziert Punkt-zu-Punkt-Rauschen bei kleiner Stichprobe,
-    // ohne den groben Kurvenverlauf zu verfälschen.
     private static final int ICC_SMOOTHING_RADIUS = 2;
     private final List<TrialSession> trialSessions;
-
-    // Sammelt pro Proband (Schlüssel: Participant.getId()) einen RMSE-Wert je Movement/Joint-
-    // Kombination, in der er Daten hat. Grundlage für einen Einstichproben-t-Test der
-    // Probanden-RMSE gegen einen fixen Referenzwert (z.B. 8°) — dafür wird EIN RMSE-Wert PRO
-    // PROBAND benötigt, nicht die punktweise über die Kohorte gemittelte 101-Punkte-Kurve.
     private final Map<String, List<Double>> perParticipantRmseSamples = new HashMap<>();
-
-    // Analog zu perParticipantRmseSamples, aber für den systematischen Versatz: Bias
-    // (Mittelwert von OpenCap − Theia über die 101 Punkte) und der um diesen Versatz bereinigte
-    // zentrierte RMSE, je Proband und Movement/Joint-Kombination. Der Bias trennt einen konstanten
-    // Offset (z.B. unterschiedliche Modell-Nulllage der Systeme) vom verbleibenden
-    // Kurvenverlaufsfehler: rmseCentered² = rmse² − bias².
     private final Map<String, List<Double>> perParticipantBiasSamples = new HashMap<>();
     private final Map<String, List<Double>> perParticipantRmseCenteredSamples = new HashMap<>();
 
@@ -61,48 +47,27 @@ public class StatisticalAnalysisService {
 
         AnalysisResults results = new AnalysisResults();
 
-        // Outer loop execution layer: Process per discrete motor task category
         for (Movement movement : Movement.values()) {
-
-            // Intermediary execution layer: Process per in-scope anatomical tracking joint profile
-            // (Hüfte/Knie/Sprunggelenk — siehe Joints.ANALYSIS_SCOPE)
             for (Joints joint : Joints.ANALYSIS_SCOPE) {
 
                 List<double[]> allOpenCapCurves = new ArrayList<>();
                 List<double[]> allTheiaCurves = new ArrayList<>();
-
-                // Je Proband genau EIN Bias- und EIN zentrierter RMSE-Wert für DIESE Movement/
-                // Joint-Kombination. Diese Kennwerte sind bewusst keine 101-Punkte-Kurven: Der Bias
-                // ist der über die Zeitachse gemittelte Versatz eines Probandenkurvenpaares und
-                // wird erst anschließend über die Kohorte gemittelt.
                 List<Double> jointBiasValues = new ArrayList<>();
                 List<Double> jointRmseCenteredValues = new ArrayList<>();
 
-                // Cohort iteration block: Aggregate normalized coordinates over all loaded participant sessions
                 for (TrialSession session : this.trialSessions) {
                     List<Trial> trials = session.getTrials();
                     if (trials == null) continue;
 
-                    // Trenne OpenCap und Theia explizit nach Flag – nie nach Index
                     List<Trial> openCapTrials = trials.stream()
                             .filter(t -> t != null && t.isOpenCap() && t.getMovement() == movement)
                             .toList();
                     List<Trial> theiaTrials = trials.stream()
                             .filter(t -> t != null && !t.isOpenCap() && t.getMovement() == movement)
                             .toList();
-
-                    // CLUSTERING FIX: Ein Proband liefert bis zu 3 Wiederholungstrials pro Movement.
-                    // Diese Trials sind NICHT unabhängig (dieselbe Person) — würde man sie einzeln als
-                    // "Subjects" in die ICC(3,1)-ANOVA geben, würde die Unabhängigkeitsannahme verletzt
-                    // und die Stichprobengröße künstlich aufgebläht (z.B. 14 Probanden x 3 Trials = 42
-                    // "Subjects" statt der tatsächlichen 14 unabhängigen Probanden). Fix: Erst alle
-                    // Trial-Paare EINES Probanden punktweise zu einer einzigen Mittelwertkurve pro
-                    // System zusammenfassen, danach genau EIN (OpenCap, Theia)-Kurvenpaar pro Proband
-                    // in die Statistik geben.
                     List<double[]> participantOcCurves = new ArrayList<>();
                     List<double[]> participantThCurves = new ArrayList<>();
 
-                    // Matche Paare über den reinen Dateinamen OHNE Endung (z.B. "SQT_0001")
                     for (Trial ocTrial : openCapTrials) {
                         String ocFileName = ocTrial.getSourceFileName().toLowerCase().trim();
                         if (!ocFileName.contains(".")) continue;
@@ -113,7 +78,7 @@ public class StatisticalAnalysisService {
                                     String thFileName = th.getSourceFileName().toLowerCase().trim();
                                     if (!thFileName.contains(".")) return false;
                                     String thBaseName = thFileName.substring(0, thFileName.lastIndexOf('.'));
-                                    return thBaseName.equals(ocBaseName); // Vergleiche reine Basisnamen!
+                                    return thBaseName.equals(ocBaseName);
                                 })
                                 .findFirst()
                                 .ifPresent(thTrial -> {
@@ -132,10 +97,6 @@ public class StatisticalAnalysisService {
                         allOpenCapCurves.add(participantOcCurve);
                         allTheiaCurves.add(participantThCurve);
 
-                        // Pro-Proband-Kennwerte: über die 101 Punkte DIESES EINEN Probanden gemittelt
-                        // (statt über die Kohorte an einem festen Zeitpunkt). Liefert in einem Durchgang
-                        // RMSE, Bias (systematischer Versatz OpenCap − Theia) und den um diesen Versatz
-                        // bereinigten zentrierten RMSE.
                         CurveDeviation deviation = computeCurveDeviation(participantOcCurve, participantThCurve);
 
                         if (!Double.isNaN(deviation.bias())) {
@@ -143,10 +104,6 @@ public class StatisticalAnalysisService {
                             jointRmseCenteredValues.add(deviation.rmseCentered());
                         }
 
-                        // Geschlüsselt über die echte Subject-ID statt Listenposition, da Sessions ohne
-                        // Daten für dieses Movement/Joint oben per continue übersprungen werden und die
-                        // Listenindizes dadurch zwischen Movement/Joint-Durchläufen nicht stabil
-                        // dieselbe Person referenzieren.
                         String participantId = session.getParticipant() != null ? session.getParticipant().getId() : null;
                         if (participantId != null && !Double.isNaN(deviation.rmse())) {
                             perParticipantRmseSamples
@@ -162,7 +119,6 @@ public class StatisticalAnalysisService {
                     }
                 }
 
-                // Guard boundary checking: Skip if no matching data matrices populate the targeted parameters
                 if (allOpenCapCurves.isEmpty()) {
                     continue;
                 }
@@ -171,12 +127,6 @@ public class StatisticalAnalysisService {
                 double[] icc101Points = new double[NORMALIZED_TIMELINE_POINTS];
                 double[] rmse101Points = new double[NORMALIZED_TIMELINE_POINTS];
                 double[] nrmse101Points = new double[NORMALIZED_TIMELINE_POINTS];
-
-                // Optimierung: Berechne die durchschnittliche Range of Motion (ROM) pro Proband,
-                // um Verzerrungen durch globale Extremwerte auszuschließen. Die ROM wird dabei
-                // NICHT nur aus OpenCap bestimmt, sondern aus der punktweise gemittelten Kurve
-                // von OpenCap und Theia3D — damit die NRMSE-Normierung systemübergreifend und
-                // nicht einseitig auf ein System bezogen ist.
                 double totalRomSum = 0;
                 int validRomCount = 0;
                 for (int i = 0; i < allOpenCapCurves.size(); i++) {
@@ -200,9 +150,8 @@ public class StatisticalAnalysisService {
                     }
                 }
                 double meanRom = (validRomCount > 0) ? (totalRomSum / validRomCount) : 1.0;
-                if (meanRom < 1e-6) meanRom = 1.0; // Schutz vor Division durch 0
+                if (meanRom < 1e-6) meanRom = 1.0;
 
-                // Timeline frame loop execution layer: Calculate metrics concurrently across all 101 points
                 for (int p = 0; p < NORMALIZED_TIMELINE_POINTS; p++) {
                     double[] sampleA = new double[numberOfParticipants];
                     double[] sampleB = new double[numberOfParticipants];
@@ -212,10 +161,8 @@ public class StatisticalAnalysisService {
                         sampleB[t] = allTheiaCurves.get(t)[p];
                     }
 
-                    // Execute model-3 single-measure ICC formula calculation checks
                     icc101Points[p] = IntraClassCorrelationCoefficient.calculateICC31(sampleA, sampleB);
 
-                    // Compute baseline root mean square deviation values across cross-sectional tracking lines
                     double squaredErrorsSum = 0;
                     for (int t = 0; t < numberOfParticipants; t++) {
                         double delta = sampleA[t] - sampleB[t];
@@ -224,22 +171,13 @@ public class StatisticalAnalysisService {
                     double rmse = Math.sqrt(squaredErrorsSum / numberOfParticipants);
                     rmse101Points[p] = rmse;
 
-                    // NRMSE in Prozent (%) bezogen auf die mittlere Trial-ROM
                     nrmse101Points[p] = (rmse / meanRom) * 100.0;
                 }
 
-                // SMOOTHING FIX: Punktweise ICC-Werte werden unabhängig pro Zeitpunkt aus einer kleinen
-                // Stichprobe (Probandenanzahl) geschätzt und schwanken dadurch stark von Punkt zu Punkt.
-                // Ein leichter gleitender Mittelwert entlang der Zeitachse glättet dieses Schätzrauschen,
-                // ohne den groben Kurvenverlauf zu verfälschen. RMSE/NRMSE bleiben unangetastet (deren
-                // Rauschen ist bereits durch die quadratische Mittelung über alle Probanden gedämpft).
                 icc101Points = smoothIcc(icc101Points);
 
                 results.setResultsForJoint(movement, joint, icc101Points, rmse101Points, nrmse101Points);
 
-                // Bias und zentrierter RMSE über die Kohorte: erst pro Proband über die Zeitachse,
-                // dann über die Probanden gemittelt (nicht umgekehrt — sonst würden sich positive und
-                // negative Probandenversätze beim zentrierten RMSE gegenseitig wegkürzen).
                 double meanBias = Double.NaN;
                 double meanRmseCentered = Double.NaN;
                 if (!jointBiasValues.isEmpty()) {
@@ -248,7 +186,6 @@ public class StatisticalAnalysisService {
                     results.setBiasResultsForJoint(movement, joint, meanBias, meanRmseCentered);
                 }
 
-                // Output mit integriertem NRMSE sowie Bias/zentriertem RMSE im Konsolen-Log
                 System.out.printf("%-15s | %-35s | 0%%: ICC=%.4f RMSE=%.2f° (NRMSE=%.1f%%) | 50%%: ICC=%.4f RMSE=%.2f° (NRMSE=%.1f%%) | Bias=%.2f° RMSE_zentriert=%.2f°%n",
                         movement.name(), joint.getDisplayName(),
                         icc101Points[0], rmse101Points[0], nrmse101Points[0],
@@ -257,9 +194,6 @@ public class StatisticalAnalysisService {
             }
         }
 
-        // Pro-Proband-Mittelwert über alle erfassten Movement/Joint-Kombinationen (z.B. 4 Movements
-        // x 3 Gelenke = bis zu 12 Werte pro Proband) zu genau EINEM RMSE-, Bias- und zentrierten
-        // RMSE-Wert pro Proband verdichten.
         results.setPerParticipantMeanRmse(averagePerParticipant(perParticipantRmseSamples));
         results.setPerParticipantMeanBias(
                 averagePerParticipant(perParticipantBiasSamples),
@@ -322,8 +256,8 @@ public class StatisticalAnalysisService {
             squaredCenteredSum += (delta - bias) * (delta - bias);
         }
 
-        double rmse = Math.sqrt(squaredSum / count);                  // wie bisher
-        double rmseCentered = Math.sqrt(squaredCenteredSum / count);  // ohne konstanten Versatz
+        double rmse = Math.sqrt(squaredSum / count);
+        double rmseCentered = Math.sqrt(squaredCenteredSum / count);
         return new CurveDeviation(bias, rmse, rmseCentered);
     }
 

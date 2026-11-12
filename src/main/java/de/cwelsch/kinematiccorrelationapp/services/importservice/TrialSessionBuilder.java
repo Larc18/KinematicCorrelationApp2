@@ -52,7 +52,6 @@ public class TrialSessionBuilder {
 
         long startTime = System.currentTimeMillis();
 
-        // Read all participant directories, sorted alphabetically
         List<Path> participantDirs;
         try (Stream<Path> stream = Files.list(rootFolder)) {
             participantDirs = stream
@@ -135,7 +134,6 @@ public class TrialSessionBuilder {
         long openCapFileCount = countValidFiles(openCapDir);
         long theiaFileCount = countValidFiles(theiaDir);
 
-        // Geändertes Guard-Kriterium: Blockiert nur, wenn ein System komplett leer ist (wie bei CMJ, LLL etc.)
         if (openCapFileCount == 0 || theiaFileCount == 0) {
             System.err.printf("  [Skip] Movement '%s' incomplete – OpenCap: %d file(s), Theia: %d file(s). No tracking pairs possible.%n",
                     movementName, openCapFileCount, theiaFileCount);
@@ -145,17 +143,14 @@ public class TrialSessionBuilder {
         System.out.printf("  Active movement directory verified: %s (OpenCap: %d, Theia: %d)%n",
                 movementName, openCapFileCount, theiaFileCount);
 
-        // Pipeline-Import starten
         ImportService importService = new ImportService(movementDir.toString(), angleMethod);
         List<Trial> movementTrials = importService.getTrialList();
 
         int pairedCount = 0;
-        // Wir laufen im Reißverschlussverfahren paarweise durch die importierte Liste
         for (int i = 0; i < movementTrials.size() - 1; i += 2) {
             Trial ocTrial = movementTrials.get(i);
             Trial thTrial = movementTrials.get(i + 1);
 
-            // Nur wenn für diesen spezifischen Index BEIDE Partner erfolgreich importiert wurden
             if (ocTrial != null && thTrial != null) {
                 ocTrial.setMovementName(movementName);
                 thTrial.setMovementName(movementName);

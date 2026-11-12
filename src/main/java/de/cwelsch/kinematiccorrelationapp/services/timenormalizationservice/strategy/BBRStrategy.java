@@ -14,9 +14,6 @@ import java.util.List;
 public class BBRStrategy implements MovementStrategy {
 
     private static final double ROM_ONSET_RATIO = 0.05; // 5% Schwellenwert der Rotations-Amplitude
-    // CRITICAL FIX: War vorher ein hartes "+20 Frames" — bei OpenCap (60Hz) 0,333s, bei Theia
-    // (85Hz) nur 0,235s, widerspricht der dokumentierten Framerate-Unabhängigkeit. Referenzwert
-    // 20/85s beibehalten, aber jetzt pro Trial in Frames umgerechnet (siehe CMJStrategy).
     private static final double SECOND_PEAK_SEARCH_BUFFER_SECONDS = 20.0 / 85.0;
 
     /**
@@ -39,10 +36,8 @@ public class BBRStrategy implements MovementStrategy {
 
         if (!hasPelvisRotation && !hasLumbarRotation) return fallback(frames);
 
-        // Bevorzuge LUMBAR_ROTATION, da sie die Rumpfbewegung direkter abbildet
         Joints rotationJoint = hasLumbarRotation ? Joints.LUMBAR_ROTATION : Joints.PELVIS_ROTATION;
 
-        // 1. Stand-Baseline bestimmen (Erste 5% der Aufzeichnung)
         int baselineRange = Math.max(3, (int) (frames.size() * 0.05));
         double baselineRotation = 0.0;
         int validCount = 0;
@@ -56,7 +51,6 @@ public class BBRStrategy implements MovementStrategy {
         }
         baselineRotation = validCount > 0 ? baselineRotation / validCount : 0.0;
 
-        // 2. Globale Amplitude ermitteln, um den 5%-Schwellenwert für Start-/Endgating zu setzen.
         double globalMaxAbsDeviation = 0.0;
         for (FrameData frame : frames) {
             Double rot = frame.jointAngle().get(rotationJoint);
@@ -69,15 +63,6 @@ public class BBRStrategy implements MovementStrategy {
         }
         double thresholdDelta = globalMaxAbsDeviation * ROM_ONSET_RATIO;
 
-        // 3. BUGFIX: BRR ist eine Wechselkurve (neutral -> links -> rechts -> neutral) mit ZWEI
-        // Rotations-Peaks in entgegengesetzte Richtungen. Die vorherige Version suchte nur EINEN
-        // globalen Peak und lief von dort direkt vorwärts bis zur ersten Rückkehr Richtung Baseline
-        // — das ist aber genau der Nulldurchgang ZWISCHEN den beiden Peaks (Übergang von links- nach
-        // rechtsrotiert), nicht das Ende der Bewegung. Ergebnis: Die Gegenrotation wurde regelmäßig
-        // abgeschnitten (empirisch an echten Daten bestätigt: 40% der BRR-Trials fielen dadurch auf
-        // den Fallback zurück). Fix: zuerst die ERSTE signifikante Exkursion isolieren (nicht das
-        // globale Maximum, das könnte auch der zweite Peak sein), danach gezielt nach dem ZWEITEN,
-        // späteren Peak suchen und erst ab dort das Bewegungsende bestimmen.
         int firstPeakFrame = -1;
         double firstPeakDeviation = 0.0;
         boolean inExcursion = false;
@@ -99,7 +84,7 @@ public class BBRStrategy implements MovementStrategy {
                     firstPeakFrame = i;
                 }
                 if (deviation <= thresholdDelta) {
-                    break; // erste Exkursion beendet, Peak steht fest
+                    break;
                 }
             }
         }
@@ -108,7 +93,6 @@ public class BBRStrategy implements MovementStrategy {
             return fallback(frames);
         }
 
-        // 4. Startpunkt (Rückwärtssuche vor dem ersten Peak)
         int startFrame = 0;
         for (int i = firstPeakFrame; i >= 0; i--) {
             Double rot = frames.get(i).jointAngle().get(rotationJoint);
@@ -118,7 +102,6 @@ public class BBRStrategy implements MovementStrategy {
             }
         }
 
-        // 5. Zweiten (Gegen-)Peak suchen: erst danach darf die Rückkehr zur Baseline als Ende gelten.
         int secondPeakFrame = firstPeakFrame;
         double secondPeakDeviation = Double.NEGATIVE_INFINITY;
 
@@ -133,7 +116,6 @@ public class BBRStrategy implements MovementStrategy {
             }
         }
 
-        // 6. Endpunkt (Vorwärtssuche nach dem zweiten Peak bis zur Stabilisierung an der Baseline)
         int endFrame = frames.size() - 1;
         for (int i = secondPeakFrame; i < frames.size(); i++) {
             Double rot = frames.get(i).jointAngle().get(rotationJoint);
